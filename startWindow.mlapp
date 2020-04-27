@@ -1,0 +1,409 @@
+%---------------- FILE: startWindow.mlapp ---------------%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Start window of the MicroSpec 2019 software prototype,
+% created in Appdesigner. Use installation file 
+% 'MicroSpec 2019.mlappinstall' for using the software 
+% and device.
+%
+% This file is copied into a .m-file for documentation 
+% only, and the code shown is therefor not the complete 
+% version of the .mlapp file!
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+classdef startWindow < matlab.apps.AppBase
+
+    properties (Access = private)
+        expTime = 5;
+        kernelSize = 9;
+        board;                %Arduino
+        videoWin;             %Video window
+        infoWin;              %Info window
+        newFileName;
+    end
+    
+    properties (Access = public)
+        time;                 %Used in Recordingfnc
+        speckleImageVector;   %Used in videoWindow
+        infoOpen = 0;         %Controls duplicates 
+        videoOpen = 0;        %Controls duplicates
+    end
+    % Callbacks that handle component events
+    methods (Access = private)
+        % Code that executes after component creation
+        function startupFcn(app, infoOpen) 
+            app.STARTButton.Enable = 'off'; % Default
+            app.infoOpen = infoOpen;
+            % Start arduino board
+            app.board = arduino('COM4','Nano3');  
+            % Laser off  
+            writeDigitalPin(app.board, 'D10', 0); 
+        end
+
+        % Button pushed function: PreviewcamerasetupButton
+        function PreviewcamerasetupButtonPushed(app, event)
+            % Preview the camera set-up 
+            figure(1)
+            vid = videoinput('pointgrey', 1, 'F7_Mono8_2080x1552_Mode0');
+            vidRes = vid.VideoResolution;
+            nBands = vid.NumberOfBands;
+            hImage = image( zeros(vidRes(2), vidRes(1), nBands) );
+            preview(vid, hImage);
+        end
+
+        % Value changed function: FilenameEditField
+        function FilenameEditFieldValueChanged(app, event)
+            % Take action if edit field is changed
+            app.newFileName = app.FilenameEditField.Value;
+            %Filename must be chosen, or mark as red
+            if isempty(app.newFileName)  
+                app.STARTButton.Enable = 'off';
+                app.FilenameEditField.BackgroundColor = 'red';
+            else 
+            %Control if time is choosen
+                if app.time ~= 0         
+                  app.STARTButton.Enable = 'on';
+                  app.FilenameEditField.BackgroundColor = [0.96,0.96,0.96];
+                end
+            end
+        end
+
+        % Button pushed function: STARTButton
+        function STARTButtonPushed(app, event)
+            % Action if Start-button is pushed
+            
+            % During a test, pause the test
+            if strcmp(app.STARTButton.Text, 'Computing/PAUSE') == 1 %Pause
+                app.STARTButton.Text = 'Restart';
+                writeDigitalPin(app.board, 'D10', 0); 
+                pause()
+                
+                % If no test is running, start a test
+            elseif strcmp(app.STARTButton.Text, 'START') == 1 
+                %Disable buttons during measurment
+                app.sButton20.Enable = 'off';
+                app.sButton40.Enable = 'off';
+                app.sButton60.Enable = 'off';
+                app.msButton25.Enable = 'off';
+                app.msButton5.Enable = 'off';
+                app.msButton75.Enable = 'off';
+                app.kernelButton7.Enable = 'off';
+                app.kernelButton8.Enable = 'off';
+                app.kernelButton9.Enable = 'off';
+                app.PreviewcamerasetupButton.Enable = 'off';
+                app.LoadresultsButton.Enable = 'off';
+                app.DropDown.Enable = 'off';
+                app.FilenameEditField.Enable = 'off';
+                
+                app.STARTButton.Text = 'Computing/PAUSE';
+                
+                % --------- Recording function --------- %
+                countdown = app.time;
+                %Get max/min contrast values from calibration images
+                load('contrast_milk.mat');
+                load('contrast_phantom.mat');
+                max_contrast = mean(prctile(contrast_phantom(450:650,900:1100), 80));
+                min_contrast = mean(mean(contrast_milk(600:800,800:1000)));
+                % First taken calibration image
+                calibrate(app.expTime); 
+                
+                %Initializing variables
+                k = 1;              % Counter
+                m = 268+1;          % Height (hardcoded)
+                n = 518;            % Width (hardcoded)
+                image_matrix = zeros(m,n,app.time); 
+                cal_count = 1;      % Counter
+                
+                % Laser ON
+                writeDigitalPin(app.board, 'D10', 1);
+                
+                % Start timer for measurement
+                t0 = clock;
+                while etime(clock, t0) < app.time
+                    % Calibration every 10th image
+                    if mod(cal_count,10) == 0                   
+                        writeDigitalPin(app.board, 'D10', 0);   
+                        calibrate(app.expTime);                 
+                        writeDigitalPin(app.board, 'D10', 1);   
+                    else
+                        % Timestamp for new speckle-image
+                        image_matrix(end,1,k) = etime(clock,t0);
+                        pause(0.5);
+                        capture('org_image', app.expTime);      
+                        % Image processing
+                        p_im = run_speckle('org_image','cal_image', pp.kernelSize,min_contrast,max_contrast);
+                        % Save image in matrix
+                        image_matrix(1:end-1,:,k) = p_im; 
+                        k = k+1;
+                    end
+                    cal_count = cal_count + 1;
+                    
+                    % Update approximate remaining time
+                    if countdown > 0
+                        countdown = countdown-1;
+                    end
+                    app.timeLabel.Text = num2str(countdown);
+                end
+                
+                % Laser OFF
+                writeDigitalPin(app.board, 'D10', 0);
+                % Delete space containing zeros in the end
+                image_matrix = image_matrix(:,:,(1:k-1));
+                % Save image_matrix with the given name
+                save(app.newFileName,'image_matrix', '-v7.3', '-nocompression');
+                app.speckleImageVector = image_matrix;
+                
+                % Control buttons and text
+                app.STARTButton.Text = 'Done!';
+                pause(3)
+                app.STARTButton.Text = 'Restart';
+                app.STARTButton.Enable = 'on';
+                app.ViewnewresultsButton.Enable = 'on';
+                app.FilenameEditField.Enable = 'off';
+                app.DropDown.Enable = 'off';
+                app.PreviewcamerasetupButton.Enable = 'off';
+                
+                % If a measurement is done, restart
+            elseif strcmp(app.STARTButton.Text, 'Restart') == 1 
+                % Control buttons
+                app.sButton20.Enable = 'on';
+                app.sButton40.Enable = 'on';
+                app.sButton60.Enable = 'on';
+                app.msButton25.Enable = 'on';
+                app.msButton5.Enable = 'on';
+                app.msButton75.Enable = 'on';
+                app.kernelButton7.Enable = 'on';
+                app.kernelButton8.Enable = 'on';
+                app.kernelButton9.Enable = 'on';
+                app.PreviewcamerasetupButton.Enable = 'on';
+                app.LoadresultsButton.Enable = 'on';
+                app.DropDown.Enable = 'on';
+                app.FilenameEditField.Enable = 'on';
+                app.STARTButton.Text = 'START';
+                app.ViewnewresultsButton.Enable = 'off';
+                app.timeLabel.Text = num2str(0);
+            end
+        end
+
+        % Button pushed function: sButton20
+        function sButton20Pushed(app, event)
+            % Settings for a 20 s measurement
+            if app.sButton20.BackgroundColor == [0.96,0.96,0.96] %Default
+                app.sButton20.BackgroundColor = [0.6,0.6,0.6];
+                app.sButton40.BackgroundColor = [0.96,0.96,0.96];
+                app.sButton60.BackgroundColor = [0.96,0.96,0.96];
+                
+                % Place remaining time value
+                app.time = 20;
+                app.timeLabel.Text = num2str(app.time);
+                %Check filename
+                if isempty(app.newFileName) == false
+                    app.STARTButton.Enable = 'on';
+                end
+            else
+                % Uncheck button
+                app.sButton20.BackgroundColor = [0.96,0.96,0.96];
+                app.timeLabel.Text = '0';
+                app.STARTButton.Enable = 'off';
+                app.time = 0;
+            end
+        end
+
+        % Button pushed function: sButton40
+        function sButton40Pushed(app, event)
+            % Settings for a 40 s measurement
+            if app.sButton40.BackgroundColor == [0.96,0.96,0.96] %Default
+                app.sButton40.BackgroundColor = [0.6,0.6,0.6];
+                app.sButton20.BackgroundColor = [0.96,0.96,0.96];
+                app.sButton60.BackgroundColor = [0.96,0.96,0.96];
+                
+                % Place remaining time value
+                app.time = 40;
+                app.timeLabel.Text = num2str(app.time);
+                %Check filename
+                if isempty(app.newFileName) == false
+                    app.STARTButton.Enable = 'on';
+                end
+            else
+                % Uncheck button
+                app.sButton40.BackgroundColor = [0.96,0.96,0.96];
+                app.timeLabel.Text = '0';
+                app.time = 0;
+                app.STARTButton.Enable = 'off';
+            end
+        end
+
+        % Button pushed function: sButton60
+        function sButton60Pushed(app, event)
+            % Settings for a 60 s measurement
+            if app.sButton60.BackgroundColor == [0.96,0.96,0.96] %Default
+                app.sButton60.BackgroundColor = [0.6,0.6,0.6];
+                app.sButton40.BackgroundColor = [0.96,0.96,0.96];
+                app.sButton20.BackgroundColor = [0.96,0.96,0.96];
+                
+                % Place remaining time value
+                app.time = 60;
+                app.timeLabel.Text = num2str(app.time);
+                %Check filename
+                if isempty(app.newFileName) == false
+                    app.STARTButton.Enable = 'on';
+                end
+            else
+                % Uncheck button
+                app.sButton60.BackgroundColor = [0.96,0.96,0.96];
+                app.timeLabel.Text = '0';
+                app.time = 0;
+                app.STARTButton.Enable = 'off';
+            end
+        end
+
+        % Button pushed function: LoadresultsButton
+        function LoadresultsButtonPushed(app, event)
+            % Open videoWindow without any file
+            if app.videoOpen == 0
+                app.videoWin = videoWindow(app, 'none', [0 0 0], zeros(size(app.speckleImageVector,3)), 0);
+            end
+            % Mark video window as open
+            app.videoOpen = 1;
+        end
+
+        % Button pushed function: ViewnewresultsButton
+        function ViewnewresultsButtonPushed(app, event)
+            % Open videoWindow with measurement file
+            app.videoWin = videoWindow(app, app.newFileName, app.speckleImageVector, zeros(size(app.speckleImageVector,3)), 0);
+            app.videoOpen = 1;
+        end
+
+        % Value changed function: DropDown
+        function DropDownValueChanged(app, event)
+            % Action if a test is chosen
+            value = app.DropDown.Value;
+            
+            %No predefined test
+            if  value == "No test [select time period]"
+                % Enable all time-buttons
+                delete(app.infoWin)
+                app.infoOpen = 0;
+                app.sButton20.Enable = 'on';
+                app.sButton40.Enable = 'on';
+                app.sButton60.Enable = 'on';
+                app.timeLabel.Text = '0';
+                app.STARTButton.Enable = 'off';
+            else
+                % Occlusion test chosen
+                if value == "Occlusion"
+                    % Disable all time-buttons
+                    app.sButton20.Enable = 'off';
+                    app.sButton40.Enable = 'off';
+                    app.sButton60.Enable = 'off';
+                    % Set colors of button to default
+                    app.sButton20.BackgroundColor = [0.96,0.96,0.96];
+                    app.sButton40.BackgroundColor = [0.96,0.96,0.96];
+                    app.sButton60.BackgroundColor = [0.96,0.96,0.96];
+                    app.STARTButton.Enable = 'off';
+                    app.time = 900; % 15 minutes
+                    app.timeLabel.Text = num2str(app.time);
+                    
+                    % Open a new info window if it is not already open
+                    if app.infoOpen == 0
+                        app.infoWin = infoWindow(app, 1);
+                        app.infoOpen = 1;
+                    end
+                    % Check filename
+                    if isempty(app.newFileName) == false
+                        app.STARTButton.Enable = 'on';
+                    end
+                end
+                
+                % Contralateral cooling test chosen
+                if value == "Contralateral cooling"
+                    % Disable all time-buttons
+                    app.sButton20.Enable = 'off';
+                    app.sButton40.Enable = 'off';
+                    app.sButton60.Enable = 'off';
+                    % Set colors of button to default
+                    app.sButton20.BackgroundColor = [0.96,0.96,0.96];
+                    app.sButton40.BackgroundColor = [0.96,0.96,0.96];
+                    app.sButton60.BackgroundColor = [0.96,0.96,0.96];
+                    app.STARTButton.Enable = 'off';
+                    app.time = 600; % 10 minutes
+                    app.timeLabel.Text = num2str(app.time);
+                    
+                    % Check if infoWindow is open
+                    if app.infoOpen == 0
+                        app.infoWin = infoWindow(app, 1);
+                        app.infoOpen = 1;
+                    end
+                    %Check filename
+                    if isempty(app.newFileName) == false
+                        app.STARTButton.Enable = 'on';
+                    end
+                end
+            end
+        end
+
+        % Button pushed function: msButton25
+        function msButton25Pushed(app, event)
+            % Change in exposure time
+            app.msButton25.BackgroundColor = [0.6,0.6,0.6];
+            app.msButton5.BackgroundColor = [0.96,0.96,0.96];
+            app.msButton75.BackgroundColor = [0.96,0.96,0.96];
+            app.expTime = 2.5; %milliseconds
+        end
+
+        % Button pushed function: msButton5
+        function msButton5Pushed(app, event)
+            % Change in exposure time
+            app.msButton5.BackgroundColor = [0.6,0.6,0.6];
+            app.msButton25.BackgroundColor = [0.96,0.96,0.96];
+            app.msButton75.BackgroundColor = [0.96,0.96,0.96];
+            app.expTime = 5; %milliseconds
+        end
+
+        % Button pushed function: msButton75
+        function msButton75Pushed(app, event)
+            % Change in exposure time
+            app.msButton75.BackgroundColor = [0.6,0.6,0.6];
+            app.msButton5.BackgroundColor = [0.96,0.96,0.96];
+            app.msButton25.BackgroundColor = [0.96,0.96,0.96];
+            app.expTime = 7.5; %milliseconds
+        end
+
+        % Button pushed function: kernelButton7
+        function kernelButton7Pushed(app, event)
+            % Change in kernel size
+            app.kernelButton7.BackgroundColor = [0.6,0.6,0.6];
+            app.kernelButton8.BackgroundColor = [0.96,0.96,0.96];
+            app.kernelButton9.BackgroundColor = [0.96,0.96,0.96];
+            app.kernelSize = 7;
+        end
+
+        % Button pushed function: kernelButton8
+        function kernelButton8Pushed(app, event)
+            % Change in kernel size
+            app.kernelButton8.BackgroundColor = [0.6,0.6,0.6];
+            app.kernelButton7.BackgroundColor = [0.96,0.96,0.96];
+            app.kernelButton9.BackgroundColor = [0.96,0.96,0.96];
+            app.kernelSize = 8;
+        end
+
+        % Button pushed function: kernelButton9
+        function kernelButton9Pushed(app, event)
+            % Change in kernel size
+            app.kernelButton9.BackgroundColor = [0.6,0.6,0.6];
+            app.kernelButton8.BackgroundColor = [0.96,0.96,0.96];
+            app.kernelButton7.BackgroundColor = [0.96,0.96,0.96];
+            app.kernelSize = 9;
+        end
+
+        % Close request function: MicroSpec2019UIFigure
+        function MicroSpec2019UIFigureCloseRequest(app, event)
+            % Delete connected windows and this window
+            delete(app.videoWin)
+            delete(app.infoWin)
+            delete(app)
+        end
+    end
+
+    % Component initialization is not included in .m-file.
+ 
+end
