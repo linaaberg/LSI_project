@@ -1,0 +1,189 @@
+%--------------- FILE: videoWindow.mlapp ----------------%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Video window of the MicroSpec 2019 software prototype,
+% created in Appdesigner. Use installation file 
+% 'MicroSpec 2019.mlappinstall' for using the software 
+% and device.
+%
+% This file is copied into a .m-file for documentation 
+% only, and the code shown is therefor not the complete 
+% version of the .mlapp file!
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+classdef videoWindow < matlab.apps.AppBase
+    
+    properties (Access = private)
+        averagedVector;  % Regional average vector   
+        roiWin;          % roiWindow app
+        startWindow;     % startWindow app
+        timeVectorPlay;  % Time vector for video
+        timeVectorRec;   % Time vector as recorded
+        roiOpen = 0;
+        speed;
+        stopPushed = 0;
+        videoOpen = 1;
+    end
+    
+    properties (Access = public)
+        ImageVector;            % without time
+        ImageVectorWithTime;    % with time 
+        fileName;
+    end
+    
+
+    % Callbacks that handle component events
+    methods (Access = private)
+
+        % Code that executes after component creation
+        function startupFcn(app, mainwindow, newFileName, speckleImageVector, averageVector, openClosed)
+            app.startWindow = mainwindow;
+            app.fileName = newFileName;
+            app.noneLabel.Text = app.fileName;
+            app.timeVectorRec = round((squeeze(speckleImageVector(end,1,:)).'),2);
+            app.ImageVector = speckleImageVector(1:end-1,:,:);
+            app.ImageVectorWithTime = speckleImageVector;
+            app.averagedVector = averageVector;
+            app.roiOpen = openClosed;
+            app.ofLabel.Visible = 'off';
+            app.testTimeLabel.Visible = 'off';
+            app.totalLabel.Visible = 'off';
+            app.ImagenumberLabel.Visible = 'off';
+            
+            % Show first image in video axes
+            if isempty(app.ImageVector(:,:,1)) == false
+                imagesc(app.ImageVector(:,:,1),'Parent', app.videoAxes, [0 4])
+                colorbar(app.videoAxes)
+                axis(app.videoAxes, 'tight')
+            end
+        end
+
+        % Button pushed function: SelectROIButton
+        function SelectROIButtonPushed(app, event)
+            % If ROI-window is not yet opened
+            if app.roiOpen == 0
+            % Reset averaged vector and open ROI-window
+              app.averagedVector = zeros(size(app.ImageVector,3));
+              app.roiWin = roiWindow(app.startWindow, app, app.fileName, app.ImageVectorWithTime, app.averagedVector, 1);
+            end
+            % Mark ROI-window as open
+            app.roiOpen = 1;  
+        end
+
+        % Button pushed function: SelectmeasurementButton
+        function SelectmeasurementButtonPushed(app, event)
+            % Select an earlier measurement, a .mat-file
+            [app.fileName, filePath] = uigetfile('*.mat');
+            app.ImageVectorWithTime = load([filePath,app.fileName]);
+            app.ImageVectorWithTime = app.ImageVectorWithTime.image_matrix;
+            app.noneLabel.Text = app.fileName;
+            % Re-open the video window
+            videoWindow(app.startWindow, app.fileName, app.ImageVectorWithTime, zeros(size(app.ImageVector,3)), 0)
+            delete(app)
+        end
+
+        % Button pushed function: PlayButton
+        function PlayButtonPushed(app, event)
+            % Action if play button is pushed
+            % Continue if stop is pushed earlier
+            uiresume(app.MicroSpec2019UIFigure);
+            app.graphAxes.reset; % Reset the average graph
+            app.graphAxes.Title.String ='Regional average'; 
+            % Control visibility of counter
+            app.ofLabel.Visible = 'on';
+            app.testTimeLabel.Visible = 'on';
+            app.totalLabel.Visible = 'on';
+            app.ImagenumberLabel.Visible = 'on';
+            
+            % No ROI chosen = no graph axes shown
+            if app.averagedVector == zeros(size(app.ImageVector,3))    
+               app.FramerateSlider.Enable = 'off';
+                %Variables
+                num_im = size(app.ImageVector,3);
+                app.totalLabel.Text = num2str(num_im);
+                app.speed = 1/app.FramerateSlider.Value;
+                tot_time = num_im*app.speed;
+                app.timeVectorPlay = [0:app.speed:tot_time]; 
+                k = 1;
+
+                % Place images in the graph
+                while k < num_im
+                    colormap(app.videoAxes,jet);
+                    imagesc(app.ImageVector(:,:,k),'Parent', app.videoAxes, [0 4]) 
+                    colorbar(app.videoAxes)
+                    axis(app.videoAxes, 'off', 'tight')
+                    k = k + 1;
+                    pause(app.speed-0.1)
+                    app.testTimeLabel.Text = num2str(k);
+                end
+                app.FramerateSlider.Enable = 'on';                
+                
+            else  
+            % With ROI = show the average graph
+                app.FramerateSlider.Enable = 'off';
+                %Variables
+                num_im = size(app.ImageVector,3);
+                app.totalLabel.Text = num2str(num_im);
+                app.speed = 1/app.FramerateSlider.Value;
+                tot_time = num_im*app.speed;
+                app.timeVectorPlay = [0:app.speed:tot_time]; 
+                k = 1;
+
+                % Place images in the graph
+                while k < num_im
+                    colormap(app.videoAxes,jet);
+                    imagesc(app.ImageVector(:,:,k),'Parent',...
+                        app.videoAxes, [0 4])
+                    colorbar(app.videoAxes)
+                    axis(app.videoAxes, 'off', 'tight')
+                    
+                    % Plot average value of the ROI
+                    plot(app.graphAxes, app.timeVectorRec(k:k+1), app.averagedVector(k:k+1), 'LineWidth', 2.0, 'Color', 'blue')
+                    hold(app.graphAxes,'on')
+                    xlim(app.graphAxes, [0 length(app.timeVectorRec)*1.1])
+                    ylim(app.graphAxes, [0, max(app.averagedVector)])
+                    xlabel(app.graphAxes, 'seconds')
+                    k = k + 1;
+                    pause(app.speed-0.1)
+                    app.testTimeLabel.Text = num2str(k);
+                    
+                    % Check if stop has been pushed
+                    if app.stopPushed == 1
+                        app.testTimeLabel.Text = num2str(k);
+                        break
+                    end
+                end
+                app.FramerateSlider.Enable = 'on';
+                app.testTimeLabel.Text = num2str(k);             
+                % Place the average plot onto the graph
+                [high, low] = envelope(app.averagedVector, 10, 'peak');
+                meanValues = (high+low)/2;
+                hold(app.graphAxes, 'on')
+                plot(app.graphAxes, app.timeVectorRec, meanValues, 'LineWidth', 1.0, 'Color', 'red')
+            end
+        end
+
+        % Button pushed function: StopButton
+        function StopButtonPushed(app, event)
+            app.stopPushed = 1;
+            app.FramerateSlider.Enable = 'on';
+            app.stopPushed = 0;
+            uiwait(app.MicroSpec2019UIFigure)
+        end
+
+        % Close request function: MicroSpec2019UIFigure
+        function MicroSpec2019UIFigureCloseRequest(app, event)
+        % Tell startWindow that video window is closed
+            app.startWindow.videoOpen = 0;
+            delete(app)
+        end
+
+        % Value changed function: FramerateSlider
+        function FramerateSliderValueChanged(app, event)
+            % Use the slider to change frame rate
+            app.speed = app.FramerateSlider.Value;
+        end
+    end
+
+    % Component initialization is not included in .m-file.
+
+end
