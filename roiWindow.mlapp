@@ -1,0 +1,90 @@
+%---------------- FILE: roiWindow.mlapp ----------------%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% ROI window of the MicroSpec 2019 software prototype,
+% created in Appdesigner. Use installation file 
+% 'MicroSpec 2019.mlappinstall' for using the software 
+% and device.
+%
+% This file is copied into a .m-file for documentation 
+% only, and the code shown is therefor not the complete 
+% version of the .mlapp file!
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+classdef roiWindow < matlab.apps.AppBase
+
+    properties (Access = public)
+       startWindow;      % startWindow app
+       roiOpen;
+    end
+    
+    properties (Access = private)
+        VideoApp;        % videoWindow app
+        ImageVector;     % Image matrix without time
+        ImageVectorWithTime; % Image matrix with time 
+        firstImage;      % First image of matrix
+        ax;              % Programmed axes
+        averagedVector;  % Regional averaged vector
+        fileName;        % File name from start window
+        roi;             % Chosen region
+    end
+    
+    % Callbacks that handle component events
+    methods (Access = private)
+
+        % Code that executes after component creation
+        function startupFcn(app, startwindow, videowindow, fileName, speckleImageVector, averagedVector, openClosed)
+            % Control all inputs
+            app.roiOpen = openClosed;
+            app.startWindow = startwindow;
+            app.VideoApp = videowindow;
+            app.fileName = fileName;
+            app.ImageVector = speckleImageVector(1:end-1,:,:);
+            app.ImageVectorWithTime = speckleImageVector;
+            app.firstImage = app.ImageVector(:,:,1);
+            
+            % Manual axes because of drawrectangle
+            app.ax = axes(app.MicroSpec2019UIFigure,'Position', [400 500 550 400]);
+            app.ax.Units = 'pixels';
+            app.ax.Position = [55 55 450 255];
+            colormap(app.ax,jet);
+            imagesc(app.firstImage,'Parent',app.ax,[0 4])
+            colorbar(app.ax)
+            axis(app.ax, 'off', 'tight')
+                
+            % Choose ROI with the mouse
+            app.roi = drawrectangle(app.ax, 'LineWidth', 3, 'Color', 'cyan', 'Label', 'ROI');  
+        end
+
+        % Button pushed function: ContinueButton
+        function ContinueButtonPushed(app, event)
+            % Send averaged vector to video window
+            delete(app.VideoApp)
+            videoWindow(app.startWindow, app.fileName, app.ImageVectorWithTime, app.averagedVector, 0)
+            delete(app)
+        end
+
+        % Button pushed function: DoneButton
+        function DoneButtonPushed(app, event)
+            % Create a binary mask of the chosen ROI
+            mask = createMask(app.roi, app.firstImage);
+            maskedVector = mask.*app.ImageVector;
+            % Calculate an average value from the ROI
+            averaged = sum(sum(maskedVector));
+            maskSize = length(nonzeros(mask)');
+            averaged = squeeze(averaged/maskSize);
+            app.averagedVector = averaged.';
+            % Crop and show on the axes
+            imagesc(maskedVector(:,:,4),'Parent',app.ax,[0 4])
+            colorbar(app.ax)
+            axis(app.ax, 'off', 'tight')
+        end
+
+        % Close request function: MicroSpec2019UIFigure
+        function MicroSpec2019UIFigureCloseRequest(app, event)
+        delete(app)
+        end
+    end
+
+   % Component initialization is not included in .m-file.
+
+end
