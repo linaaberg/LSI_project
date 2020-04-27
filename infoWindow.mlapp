@@ -1,0 +1,39 @@
+%---------------- FILE: infoWindow.mlapp ---------------%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Info window of the MicroSpec 2019 software prototype, 
+% created in Appdesigner. Use installation file 
+% 'MicroSpec 2019.mlappinstall' for using the software 
+% and device.
+%
+% This file is copied into a .m-file for documentation 
+% only, and the code shown is therefor not the complete 
+% version of the .mlapp file!
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+classdef infoWindow < matlab.apps.AppBase
+
+    properties (Access = public)
+        infoOpen = 1;
+        startWindow;
+    end
+
+    % Callbacks that handle component events
+    methods (Access = private)
+
+        % Code that executes after component creation
+        function startupFcn(app, mainapp, open)
+            app.infoOpen = open;
+            app.startWindow = mainapp;
+        end
+
+        % Close request function
+        function MicroSpec2019InformationUIFigureCloseRequest(app, event)
+        % Close windows
+        app.startWindow.infoOpen = 0;
+        delete(app)
+        end
+    end
+
+% Component initialization is not included in .m-file.
+    
+end
